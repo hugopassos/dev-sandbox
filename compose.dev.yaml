@@ -1,0 +1,9 @@
+services:
+  codex:
+    volumes:
+      - type: bind
+        source: ${CODEX_WORKSPACE:?Defina CODEX_WORKSPACE}
+        target: /workspace
+        read_only: false
+        bind:
+          create_host_path: false

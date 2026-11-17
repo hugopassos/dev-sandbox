@@ -1,0 +1,244 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+usage() {
+  echo "Uso:"
+  echo "  codex-isolated <readonly|dev> <diretorio>"
+  echo "  codex-isolated status <readonly|dev> <diretorio>"
+  echo "  codex-isolated check <readonly|dev> <diretorio>"
+  echo "  codex-isolated prepare <diretorio-git>"
+  echo "  codex-isolated review <diretorio-git>"
+  echo "  codex-isolated diff <diretorio-git>"
+  echo "  codex-isolated sync <diretorio-git> [--apply]"
+  echo "  codex-isolated merge <diretorio-git>"
+  echo "  codex-isolated resolve <diretorio-git> <sessao>"
+  echo
+  echo "Runtimes: ruby (padrão), node, python, php"
+  exit 1
+}
+
+ACTION="run"
+
+if [[ "${1:-}" == "prepare" ]]; then
+  [[ $# -eq 2 ]] || usage
+
+  SCRIPT_PATH="$(realpath -e "${BASH_SOURCE[0]}")"
+  SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
+  BASE_DIR="$(dirname "$SCRIPT_DIR")"
+
+  exec python3 "$BASE_DIR/bin/prepare_workspace.py" "$2"
+fi
+
+if [[ "${1:-}" == "status" || "${1:-}" == "check" ]]; then
+  ACTION="$1"
+  shift
+fi
+
+if [[ "${1:-}" == "review" ]]; then
+  [[ $# -eq 2 ]] || usage
+
+  SCRIPT_PATH="$(realpath -e "${BASH_SOURCE[0]}")"
+  SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
+  BASE_DIR="$(dirname "$SCRIPT_DIR")"
+
+  exec python3 "$BASE_DIR/bin/review_workspace.py" "$2"
+fi
+
+if [[ "${1:-}" == "diff" ]]; then
+  [[ $# -eq 2 ]] || usage
+
+  SCRIPT_PATH="$(realpath -e "${BASH_SOURCE[0]}")"
+  SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
+  BASE_DIR="$(dirname "$SCRIPT_DIR")"
+
+  exec python3 "$BASE_DIR/bin/diff_workspace.py" "$2"
+fi
+
+if [[ "${1:-}" == "sync" ]]; then
+  [[ $# -ge 2 && $# -le 3 ]] || usage
+
+  if [[ $# -eq 3 && "$3" != "--apply" ]]; then
+    usage
+  fi
+
+  SCRIPT_PATH="$(realpath -e "${BASH_SOURCE[0]}")"
+  SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
+  BASE_DIR="$(dirname "$SCRIPT_DIR")"
+
+  exec python3 "$BASE_DIR/bin/sync_workspace.py" "${@:2}"
+fi
+
+if [[ "${1:-}" == "merge" ]]; then
+  [[ $# -eq 2 ]] || usage
+
+  SCRIPT_PATH="$(realpath -e "${BASH_SOURCE[0]}")"
+  SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
+  BASE_DIR="$(dirname "$SCRIPT_DIR")"
+
+  exec python3 "$BASE_DIR/bin/merge_workspace.py" "$2"
+fi
+
+if [[ "${1:-}" == "resolve" ]]; then
+  [[ $# -eq 3 ]] || usage
+
+  SCRIPT_PATH="$(realpath -e "${BASH_SOURCE[0]}")"
+  SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
+  BASE_DIR="$(dirname "$SCRIPT_DIR")"
+
+  exec python3 "$BASE_DIR/bin/resolve_workspace.py" "$2" "$3"
+fi
+
+[[ $# -ge 2 && $# -le 3 ]] || usage
+
+MODE="$1"
+WORKSPACE="$2"
+RUNTIME="${3:-ruby}"
+
+case "$RUNTIME" in
+  ruby|node|python|php) ;;
+  *)
+    echo "Runtime não suportado: $RUNTIME"
+    usage
+    ;;
+esac
+
+case "$MODE" in
+  readonly|dev) ;;
+  *) usage ;;
+esac
+
+[[ -d "$WORKSPACE" ]] || {
+  echo "Erro: diretório não encontrado: $WORKSPACE"
+  exit 1
+}
+
+# Normaliza o caminho e resolve links simbólicos.
+WORKSPACE="$(realpath -e -- "$WORKSPACE")"
+
+# Resolve links simbólicos para localizar o script original.
+SCRIPT_PATH="$(realpath -e "${BASH_SOURCE[0]}")"
+
+# Diretório real da infraestrutura.
+SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
+BASE_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Impede montagens acidentais muito abrangentes.
+case "$WORKSPACE" in
+  /|/home|"$HOME"|"$BASE_DIR")
+    echo "Erro: diretório abrangente demais."
+    exit 1
+    ;;
+esac
+
+# Bloqueia alguns tipos conhecidos de arquivos sensíveis.
+# Não substitui uma revisão completa do workspace.
+SENSITIVE_FILE="$(
+  find "$WORKSPACE" \
+    \( -type f -o -type l \) \
+    \( \
+      -name '.env' -o \
+      -name '.env.*' -o \
+      -name '*.pem' -o \
+      -name '*.key' -o \
+      -name '*.p12' -o \
+      -name '*.pfx' -o \
+      -name 'master.key' -o \
+      -name 'credentials.yml.enc' -o \
+      -name '*.csv' -o \
+      -name '*.xlsx' -o \
+      -name '*.xlsm' \
+    \) \
+    -print -quit
+)"
+
+if [[ -n "$SENSITIVE_FILE" ]]; then
+  echo "Workspace contém arquivo potencialmente sensível:"
+  echo "$SENSITIVE_FILE"
+  echo "Prepare um workspace sanitizado antes de continuar."
+  exit 1
+fi
+
+# Identidade estável e independente para cada workspace.
+PROJECT_NAME="$(
+  printf '%s' "$(basename "$WORKSPACE")" |
+    tr '[:upper:]' '[:lower:]' |
+    tr -c 'a-z0-9_-' '-'
+)"
+
+PROJECT_NAME="${PROJECT_NAME:0:24}"
+PROJECT_HASH="$(printf '%s' "$WORKSPACE" |
+  sha256sum | cut -c1-12)"
+
+export CODEX_STACK="codex-${PROJECT_NAME}-${PROJECT_HASH}"
+export CODEX_WORKSPACE="$WORKSPACE"
+export CODEX_RUNTIME="$RUNTIME"
+
+COMPOSE_FILES=(-f compose.yaml)
+
+if [[ "$MODE" == "dev" ]]; then
+  COMPOSE_FILES+=(-f compose.dev.yaml)
+fi
+
+cd "$BASE_DIR"
+
+echo "Modo: $MODE"
+echo "Workspace: $CODEX_WORKSPACE"
+echo "Ambiente: $CODEX_STACK"
+echo "Runtime: $CODEX_RUNTIME"
+
+# Confirma a validade do Compose antes de executar.
+docker compose "${COMPOSE_FILES[@]}" config --quiet
+
+# Analisa a configuração final do Compose, sem exibir
+# variáveis de ambiente ou informações de autenticação.
+inspect_configuration() {
+  docker compose "${COMPOSE_FILES[@]}" \
+    config --format json |
+    python3 "$BASE_DIR/bin/inspect_config.py"
+}
+
+if [[ "$ACTION" != "status" ]]; then
+  IMAGE="codex-isolated:$CODEX_RUNTIME"
+
+  if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+    echo "Imagem não encontrada: $IMAGE"
+    echo "Construa a imagem antes de continuar:"
+    echo "  cd $BASE_DIR"
+    echo "  CODEX_RUNTIME=$CODEX_RUNTIME docker compose build codex"
+    exit 1
+  fi
+fi
+
+# Testa restrições reais em um container descartável.
+check_runtime() {
+  docker compose "${COMPOSE_FILES[@]}" \
+    run --rm --no-deps -T \
+    -e CODEX_CHECK_MODE="$MODE" \
+    codex node - < "$BASE_DIR/bin/check_runtime.js"
+}
+
+export CODEX_MODE="$MODE"
+
+if [[ "$ACTION" == "status" ]]; then
+  inspect_configuration
+  exit $?
+fi
+
+if [[ "$ACTION" == "check" ]]; then
+  inspect_configuration
+  echo
+  echo "Executando testes no container..."
+  check_runtime
+  exit $?
+fi
+
+# O Docker é a fronteira de isolamento.
+# O sandbox interno do Codex foi desativado porque
+# não consegue criar namespaces neste container.
+docker compose "${COMPOSE_FILES[@]}" run --rm \
+  codex codex \
+  --cd /workspace \
+  --sandbox danger-full-access \
+  --ask-for-approval on-request \
+  --no-alt-screen
