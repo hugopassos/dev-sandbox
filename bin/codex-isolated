@@ -2,15 +2,20 @@
 
 set -euo pipefail
 
+# Localiza a infraestrutura, mesmo quando o launcher
+# é executado através de um link simbólico.
+SCRIPT_PATH="$(realpath -e -- "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
+BASE_DIR="$(dirname "$SCRIPT_DIR")"
+
 usage() {
   echo "Uso:"
-  echo "  codex-isolated <readonly|dev> <diretorio>"
-  echo "  codex-isolated status <readonly|dev> <diretorio>"
-  echo "  codex-isolated check <readonly|dev> <diretorio>"
+  echo "  codex-isolated <readonly|dev> <diretorio-git> [runtime]"
+  echo "  codex-isolated status <readonly|dev> <diretorio-git> [runtime]"
+  echo "  codex-isolated check <readonly|dev> <diretorio-git> [runtime]"
   echo "  codex-isolated prepare <diretorio-git>"
   echo "  codex-isolated review <diretorio-git>"
   echo "  codex-isolated diff <diretorio-git>"
-  echo "  codex-isolated sync <diretorio-git> [--apply]"
   echo "  codex-isolated merge <diretorio-git>"
   echo "  codex-isolated resolve <diretorio-git> <sessao>"
   echo
@@ -18,121 +23,95 @@ usage() {
   exit 1
 }
 
+# Comandos que não precisam iniciar o Docker.
+case "${1:-}" in
+  prepare|review|diff|merge)
+    [[ $# -eq 2 ]] || usage
+
+    ACTION="$1"
+    shift
+
+    exec python3 \
+      "$BASE_DIR/bin/${ACTION}_workspace.py" \
+      "$1"
+    ;;
+
+  resolve)
+    [[ $# -eq 3 ]] || usage
+
+    exec python3 \
+      "$BASE_DIR/bin/resolve_workspace.py" \
+      "$2" "$3"
+    ;;
+esac
+
+# Comandos que utilizam Docker.
 ACTION="run"
-
-if [[ "${1:-}" == "prepare" ]]; then
-  [[ $# -eq 2 ]] || usage
-
-  SCRIPT_PATH="$(realpath -e "${BASH_SOURCE[0]}")"
-  SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
-  BASE_DIR="$(dirname "$SCRIPT_DIR")"
-
-  exec python3 "$BASE_DIR/bin/prepare_workspace.py" "$2"
-fi
 
 if [[ "${1:-}" == "status" || "${1:-}" == "check" ]]; then
   ACTION="$1"
   shift
 fi
 
-if [[ "${1:-}" == "review" ]]; then
-  [[ $# -eq 2 ]] || usage
-
-  SCRIPT_PATH="$(realpath -e "${BASH_SOURCE[0]}")"
-  SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
-  BASE_DIR="$(dirname "$SCRIPT_DIR")"
-
-  exec python3 "$BASE_DIR/bin/review_workspace.py" "$2"
-fi
-
-if [[ "${1:-}" == "diff" ]]; then
-  [[ $# -eq 2 ]] || usage
-
-  SCRIPT_PATH="$(realpath -e "${BASH_SOURCE[0]}")"
-  SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
-  BASE_DIR="$(dirname "$SCRIPT_DIR")"
-
-  exec python3 "$BASE_DIR/bin/diff_workspace.py" "$2"
-fi
-
-if [[ "${1:-}" == "sync" ]]; then
-  [[ $# -ge 2 && $# -le 3 ]] || usage
-
-  if [[ $# -eq 3 && "$3" != "--apply" ]]; then
-    usage
-  fi
-
-  SCRIPT_PATH="$(realpath -e "${BASH_SOURCE[0]}")"
-  SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
-  BASE_DIR="$(dirname "$SCRIPT_DIR")"
-
-  exec python3 "$BASE_DIR/bin/sync_workspace.py" "${@:2}"
-fi
-
-if [[ "${1:-}" == "merge" ]]; then
-  [[ $# -eq 2 ]] || usage
-
-  SCRIPT_PATH="$(realpath -e "${BASH_SOURCE[0]}")"
-  SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
-  BASE_DIR="$(dirname "$SCRIPT_DIR")"
-
-  exec python3 "$BASE_DIR/bin/merge_workspace.py" "$2"
-fi
-
-if [[ "${1:-}" == "resolve" ]]; then
-  [[ $# -eq 3 ]] || usage
-
-  SCRIPT_PATH="$(realpath -e "${BASH_SOURCE[0]}")"
-  SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
-  BASE_DIR="$(dirname "$SCRIPT_DIR")"
-
-  exec python3 "$BASE_DIR/bin/resolve_workspace.py" "$2" "$3"
-fi
-
 [[ $# -ge 2 && $# -le 3 ]] || usage
 
 MODE="$1"
-WORKSPACE="$2"
+ORIGINAL_WORKSPACE="$2"
 RUNTIME="${3:-ruby}"
-
-case "$RUNTIME" in
-  ruby|node|python|php) ;;
-  *)
-    echo "Runtime não suportado: $RUNTIME"
-    usage
-    ;;
-esac
 
 case "$MODE" in
   readonly|dev) ;;
   *) usage ;;
 esac
 
-[[ -d "$WORKSPACE" ]] || {
-  echo "Erro: diretório não encontrado: $WORKSPACE"
+case "$RUNTIME" in
+  ruby|node|python|php) ;;
+  *)
+    echo "Runtime não suportado: $RUNTIME" >&2
+    usage
+    ;;
+esac
+
+# Valida o repositório informado pelo desenvolvedor.
+if [[ ! -d "$ORIGINAL_WORKSPACE" ]]; then
+  echo "Erro: diretório não encontrado: $ORIGINAL_WORKSPACE" >&2
   exit 1
-}
+fi
 
-# Normaliza o caminho e resolve links simbólicos.
-WORKSPACE="$(realpath -e -- "$WORKSPACE")"
+ORIGINAL_WORKSPACE="$(
+  realpath -e -- "$ORIGINAL_WORKSPACE"
+)"
 
-# Resolve links simbólicos para localizar o script original.
-SCRIPT_PATH="$(realpath -e "${BASH_SOURCE[0]}")"
-
-# Diretório real da infraestrutura.
-SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
-BASE_DIR="$(dirname "$SCRIPT_DIR")"
-
-# Impede montagens acidentais muito abrangentes.
-case "$WORKSPACE" in
+# Impede caminhos excessivamente abrangentes.
+case "$ORIGINAL_WORKSPACE" in
   /|/home|"$HOME"|"$BASE_DIR")
-    echo "Erro: diretório abrangente demais."
+    echo "Erro: diretório original não permitido." >&2
     exit 1
     ;;
 esac
 
-# Bloqueia alguns tipos conhecidos de arquivos sensíveis.
-# Não substitui uma revisão completa do workspace.
+# Localiza obrigatoriamente o workspace preparado.
+# O repositório original nunca é enviado como bind mount.
+WORKSPACE="$(
+  python3 "$BASE_DIR/bin/locate_workspace.py" \
+    "$ORIGINAL_WORKSPACE"
+)"
+
+# Verifica novamente o workspace antes de permitir
+# que ele seja disponibilizado ao container.
+python3 "$BASE_DIR/bin/audit_workspace.py" \
+  "$ORIGINAL_WORKSPACE"
+
+# Defesa adicional contra caminhos inesperados.
+case "$WORKSPACE" in
+  /|/home|"$HOME"|"$BASE_DIR"|"$ORIGINAL_WORKSPACE")
+    echo "Erro: workspace isolado inválido." >&2
+    exit 1
+    ;;
+esac
+
+# Bloqueia nomes conhecidos de arquivos sensíveis
+# no diretório que será efetivamente montado.
 SENSITIVE_FILE="$(
   find "$WORKSPACE" \
     \( -type f -o -type l \) \
@@ -153,26 +132,31 @@ SENSITIVE_FILE="$(
 )"
 
 if [[ -n "$SENSITIVE_FILE" ]]; then
-  echo "Workspace contém arquivo potencialmente sensível:"
-  echo "$SENSITIVE_FILE"
-  echo "Prepare um workspace sanitizado antes de continuar."
+  echo "Workspace contém arquivo potencialmente sensível:" >&2
+  echo "$SENSITIVE_FILE" >&2
+  echo "Revise a cópia preparada antes de continuar." >&2
   exit 1
 fi
 
-# Identidade estável e independente para cada workspace.
+# Identidade estável baseada no projeto original.
 PROJECT_NAME="$(
-  printf '%s' "$(basename "$WORKSPACE")" |
+  printf '%s' "$(basename "$ORIGINAL_WORKSPACE")" |
     tr '[:upper:]' '[:lower:]' |
     tr -c 'a-z0-9_-' '-'
 )"
 
 PROJECT_NAME="${PROJECT_NAME:0:24}"
-PROJECT_HASH="$(printf '%s' "$WORKSPACE" |
-  sha256sum | cut -c1-12)"
+
+PROJECT_HASH="$(
+  printf '%s' "$ORIGINAL_WORKSPACE" |
+    sha256sum |
+    cut -c1-12
+)"
 
 export CODEX_STACK="codex-${PROJECT_NAME}-${PROJECT_HASH}"
 export CODEX_WORKSPACE="$WORKSPACE"
 export CODEX_RUNTIME="$RUNTIME"
+export CODEX_MODE="$MODE"
 
 COMPOSE_FILES=(-f compose.yaml)
 
@@ -183,34 +167,20 @@ fi
 cd "$BASE_DIR"
 
 echo "Modo: $MODE"
-echo "Workspace: $CODEX_WORKSPACE"
+echo "Projeto original: $ORIGINAL_WORKSPACE"
+echo "Workspace isolado: $CODEX_WORKSPACE"
 echo "Ambiente: $CODEX_STACK"
 echo "Runtime: $CODEX_RUNTIME"
 
-# Confirma a validade do Compose antes de executar.
+# Valida a configuração efetiva do Compose.
 docker compose "${COMPOSE_FILES[@]}" config --quiet
 
-# Analisa a configuração final do Compose, sem exibir
-# variáveis de ambiente ou informações de autenticação.
 inspect_configuration() {
   docker compose "${COMPOSE_FILES[@]}" \
     config --format json |
     python3 "$BASE_DIR/bin/inspect_config.py"
 }
 
-if [[ "$ACTION" != "status" ]]; then
-  IMAGE="codex-isolated:$CODEX_RUNTIME"
-
-  if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
-    echo "Imagem não encontrada: $IMAGE"
-    echo "Construa a imagem antes de continuar:"
-    echo "  cd $BASE_DIR"
-    echo "  CODEX_RUNTIME=$CODEX_RUNTIME docker compose build codex"
-    exit 1
-  fi
-fi
-
-# Testa restrições reais em um container descartável.
 check_runtime() {
   docker compose "${COMPOSE_FILES[@]}" \
     run --rm --no-deps -T \
@@ -218,11 +188,20 @@ check_runtime() {
     codex node - < "$BASE_DIR/bin/check_runtime.js"
 }
 
-export CODEX_MODE="$MODE"
-
 if [[ "$ACTION" == "status" ]]; then
   inspect_configuration
-  exit $?
+  exit 0
+fi
+
+# Confirma que a imagem selecionada existe.
+IMAGE="codex-isolated:$CODEX_RUNTIME"
+
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  echo "Imagem não encontrada: $IMAGE" >&2
+  echo "Construa a imagem antes de continuar:" >&2
+  echo "  cd $BASE_DIR" >&2
+  echo "  CODEX_RUNTIME=$CODEX_RUNTIME docker compose build codex" >&2
+  exit 1
 fi
 
 if [[ "$ACTION" == "check" ]]; then
@@ -230,12 +209,12 @@ if [[ "$ACTION" == "check" ]]; then
   echo
   echo "Executando testes no container..."
   check_runtime
-  exit $?
+  exit 0
 fi
 
 # O Docker é a fronteira de isolamento.
-# O sandbox interno do Codex foi desativado porque
-# não consegue criar namespaces neste container.
+# O sandbox interno do Codex não consegue criar
+# namespaces dentro deste container restrito.
 docker compose "${COMPOSE_FILES[@]}" run --rm \
   codex codex \
   --cd /workspace \

@@ -7,7 +7,7 @@ class UnsafeFileError(Exception):
     pass
 
 
-def read_regular_file(root, relative, max_size):
+def read_regular_file(root, relative, max_size, require_single_link=False):
     """
     Lê um arquivo regular dentro de root, sem seguir
     links simbólicos nos componentes do caminho.
@@ -65,6 +65,11 @@ def read_regular_file(root, relative, max_size):
 
             if not stat.S_ISREG(info.st_mode):
                 raise UnsafeFileError('Arquivo não regular')
+
+            if require_single_link and info.st_nlink != 1:
+                raise UnsafeFileError(
+                    'Arquivo possui múltiplos hard links'
+                )
 
             if info.st_size > max_size:
                 raise UnsafeFileError('Arquivo muito grande')
