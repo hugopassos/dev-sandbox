@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const net = require('node:net');
 
-const mode = process.env.CODEX_CHECK_MODE;
+const mode = process.env.DEV_SANDBOX_CHECK_MODE;
 
 let failed = false;
 
@@ -25,7 +25,7 @@ function checkWorkspaceRead() {
 }
 
 function checkWorkspaceWrite() {
-  const path = `/workspace/.codex-check-${process.pid}-${Date.now()}`;
+  const path = `/workspace/.dev-sandbox-check-${process.pid}-${Date.now()}`;
 
   let writable = false;
 
@@ -54,7 +54,7 @@ function checkWorkspaceWrite() {
 }
 
 function checkSystemWrite() {
-  const path = `/etc/.codex-check-${process.pid}`;
+  const path = `/etc/.dev-sandbox-check-${process.pid}`;
 
   let writable = false;
 

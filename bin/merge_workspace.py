@@ -26,7 +26,7 @@ from safe_files import read_regular_file, UnsafeFileError
 
 
 MERGES_DIR = (
-    Path.home() / '.local/share/codex-isolated/merges'
+    Path.home() / '.local/share/dev-sandbox/merges'
 )
 
 MAX_MERGED_SIZE = 4 * 1024 * 1024

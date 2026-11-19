@@ -2,7 +2,7 @@ services:
   codex:
     volumes:
       - type: bind
-        source: ${CODEX_WORKSPACE:?Defina CODEX_WORKSPACE}
+        source: ${DEV_SANDBOX_WORKSPACE:?Defina DEV_SANDBOX_WORKSPACE}
         target: /workspace
         read_only: false
         bind:

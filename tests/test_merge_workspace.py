@@ -44,7 +44,7 @@ class MergeWorkspaceTest(unittest.TestCase):
         name = f'{self.repo.name}-{digest}'
 
         self.storage = (
-            self.home / '.local/share/codex-isolated'
+            self.home / '.local/share/dev-sandbox'
         )
         self.workspace = self.storage / 'workspaces' / name
         self.baseline = self.storage / 'baselines' / name
