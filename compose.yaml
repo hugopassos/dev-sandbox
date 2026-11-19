@@ -1,13 +1,13 @@
-name: ${CODEX_STACK:?Defina CODEX_STACK}
+name: ${DEV_SANDBOX_STACK:?Defina DEV_SANDBOX_STACK}
 
 services:
   codex:
     build:
       context: .
       dockerfile: Dockerfile
-      target: runtime-${CODEX_RUNTIME:-ruby}
+      target: runtime-${DEV_SANDBOX_RUNTIME:-ruby}
 
-    image: codex-isolated:${CODEX_RUNTIME:-ruby}
+    image: dev-sandbox:${DEV_SANDBOX_RUNTIME:-ruby}
 
     working_dir: /workspace
     user: "node"
@@ -33,7 +33,7 @@ services:
 
     volumes:
       - type: bind
-        source: ${CODEX_WORKSPACE:?Defina CODEX_WORKSPACE}
+        source: ${DEV_SANDBOX_WORKSPACE:?Defina DEV_SANDBOX_WORKSPACE}
         target: /workspace
         read_only: true
         bind:

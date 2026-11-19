@@ -41,7 +41,7 @@ def resolve(source_path, session_path):
 
     expected_parent = (
         Path.home()
-        / '.local/share/codex-isolated/merges'
+        / '.local/share/dev-sandbox/merges'
         / workspace.name
     ).resolve(strict=True)
 

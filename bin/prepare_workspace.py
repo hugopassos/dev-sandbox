@@ -16,15 +16,15 @@ from safe_files import read_regular_file, UnsafeFileError
 
 
 WORKSPACES_DIR = (
-    Path.home() / '.local/share/codex-isolated/workspaces'
+    Path.home() / '.local/share/dev-sandbox/workspaces'
 )
 
 MANIFESTS_DIR = (
-    Path.home() / '.local/share/codex-isolated/manifests'
+    Path.home() / '.local/share/dev-sandbox/manifests'
 )
 
 BASELINES_DIR = (
-    Path.home() / '.local/share/codex-isolated/baselines'
+    Path.home() / '.local/share/dev-sandbox/baselines'
 )
 
 MAX_FILE_SIZE = 2 * 1024 * 1024

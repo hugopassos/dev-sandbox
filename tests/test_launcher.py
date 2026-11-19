@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-LAUNCHER = ROOT / 'bin/codex-isolated'
+LAUNCHER = ROOT / 'bin/dev-sandbox'
 PREPARE = ROOT / 'bin/prepare_workspace.py'
 
 
@@ -24,23 +24,23 @@ log = Path(os.environ['DOCKER_TEST_LOG'])
 with log.open('a', encoding='utf-8') as file:
     file.write(json.dumps({
         'args': sys.argv[1:],
-        'workspace': os.environ.get('CODEX_WORKSPACE'),
-        'stack': os.environ.get('CODEX_STACK'),
-        'runtime': os.environ.get('CODEX_RUNTIME'),
+        'workspace': os.environ.get('DEV_SANDBOX_WORKSPACE'),
+        'stack': os.environ.get('DEV_SANDBOX_STACK'),
+        'runtime': os.environ.get('DEV_SANDBOX_RUNTIME'),
     }) + '\n')
 
 if 'config' not in sys.argv:
     sys.exit('Comando Docker inesperado')
 
 if '--format' in sys.argv:
-    runtime = os.environ['CODEX_RUNTIME']
+    runtime = os.environ['DEV_SANDBOX_RUNTIME']
     mode = 'dev' if 'compose.dev.yaml' in sys.argv else 'readonly'
 
     config = {
-        'name': os.environ['CODEX_STACK'],
+        'name': os.environ['DEV_SANDBOX_STACK'],
         'services': {
             'codex': {
-                'image': f'codex-isolated:{runtime}',
+                'image': f'dev-sandbox:{runtime}',
                 'build': {'target': f'runtime-{runtime}'},
                 'read_only': True,
                 'cap_drop': ['ALL'],
@@ -48,7 +48,7 @@ if '--format' in sys.argv:
                 'networks': {'codex_internal': None},
                 'volumes': [{
                     'type': 'bind',
-                    'source': os.environ['CODEX_WORKSPACE'],
+                    'source': os.environ['DEV_SANDBOX_WORKSPACE'],
                     'target': '/workspace',
                     'read_only': mode == 'readonly',
                 }],
@@ -116,7 +116,7 @@ class LauncherTest(unittest.TestCase):
 
         self.workspace = (
             self.home
-            / '.local/share/codex-isolated/workspaces'
+            / '.local/share/dev-sandbox/workspaces'
             / f'{self.repo.name}-{digest}'
         )
 

@@ -41,12 +41,12 @@ class WorkspaceFlowTest(unittest.TestCase):
         self.workspace_name = f'{self.repo.name}-{digest}'
 
         self.workspace = (
-            self.home / '.local/share/codex-isolated/workspaces'
+            self.home / '.local/share/dev-sandbox/workspaces'
             / self.workspace_name
         )
 
         self.manifest = (
-            self.home / '.local/share/codex-isolated/manifests'
+            self.home / '.local/share/dev-sandbox/manifests'
             / f'{self.workspace_name}.json'
         )
 
@@ -224,7 +224,7 @@ class WorkspaceFlowTest(unittest.TestCase):
         self.prepare()
 
         baseline = (
-            self.home / '.local/share/codex-isolated/baselines'
+            self.home / '.local/share/dev-sandbox/baselines'
             / self.workspace_name
         )
 

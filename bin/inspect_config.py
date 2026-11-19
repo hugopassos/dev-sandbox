@@ -9,10 +9,10 @@ def inspect_config(config):
     service = config['services']['codex']
     proxy = config['services']['proxy']
 
-    mode = os.environ['CODEX_MODE']
-    workspace = os.environ['CODEX_WORKSPACE']
-    stack = os.environ['CODEX_STACK']
-    runtime = os.environ['CODEX_RUNTIME']
+    mode = os.environ['DEV_SANDBOX_MODE']
+    workspace = os.environ['DEV_SANDBOX_WORKSPACE']
+    stack = os.environ['DEV_SANDBOX_STACK']
+    runtime = os.environ['DEV_SANDBOX_RUNTIME']
 
     mounts = [
         item
@@ -35,7 +35,7 @@ def inspect_config(config):
             and mount.get('type') == 'bind',
 
         'Imagem correta':
-            service.get('image') == f'codex-isolated:{runtime}',
+            service.get('image') == f'dev-sandbox:{runtime}',
 
         'Build target correto':
             service.get('build', {}).get('target') == f'runtime-{runtime}',

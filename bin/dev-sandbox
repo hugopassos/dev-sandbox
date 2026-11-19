@@ -10,14 +10,14 @@ BASE_DIR="$(dirname "$SCRIPT_DIR")"
 
 usage() {
   echo "Uso:"
-  echo "  codex-isolated <readonly|dev> <diretorio-git> [runtime]"
-  echo "  codex-isolated status <readonly|dev> <diretorio-git> [runtime]"
-  echo "  codex-isolated check <readonly|dev> <diretorio-git> [runtime]"
-  echo "  codex-isolated prepare <diretorio-git>"
-  echo "  codex-isolated review <diretorio-git>"
-  echo "  codex-isolated diff <diretorio-git>"
-  echo "  codex-isolated merge <diretorio-git>"
-  echo "  codex-isolated resolve <diretorio-git> <sessao>"
+  echo "  dev-sandbox <readonly|dev> <diretorio-git> [runtime]"
+  echo "  dev-sandbox status <readonly|dev> <diretorio-git> [runtime]"
+  echo "  dev-sandbox check <readonly|dev> <diretorio-git> [runtime]"
+  echo "  dev-sandbox prepare <diretorio-git>"
+  echo "  dev-sandbox review <diretorio-git>"
+  echo "  dev-sandbox diff <diretorio-git>"
+  echo "  dev-sandbox merge <diretorio-git>"
+  echo "  dev-sandbox resolve <diretorio-git> <sessao>"
   echo
   echo "Runtimes: ruby (padrão), node, python, php"
   exit 1
@@ -153,10 +153,10 @@ PROJECT_HASH="$(
     cut -c1-12
 )"
 
-export CODEX_STACK="codex-${PROJECT_NAME}-${PROJECT_HASH}"
-export CODEX_WORKSPACE="$WORKSPACE"
-export CODEX_RUNTIME="$RUNTIME"
-export CODEX_MODE="$MODE"
+export DEV_SANDBOX_STACK="dev-sandbox-${PROJECT_NAME}-${PROJECT_HASH}"
+export DEV_SANDBOX_WORKSPACE="$WORKSPACE"
+export DEV_SANDBOX_RUNTIME="$RUNTIME"
+export DEV_SANDBOX_MODE="$MODE"
 
 COMPOSE_FILES=(-f compose.yaml)
 
@@ -168,9 +168,9 @@ cd "$BASE_DIR"
 
 echo "Modo: $MODE"
 echo "Projeto original: $ORIGINAL_WORKSPACE"
-echo "Workspace isolado: $CODEX_WORKSPACE"
-echo "Ambiente: $CODEX_STACK"
-echo "Runtime: $CODEX_RUNTIME"
+echo "Workspace isolado: $DEV_SANDBOX_WORKSPACE"
+echo "Ambiente: $DEV_SANDBOX_STACK"
+echo "Runtime: $DEV_SANDBOX_RUNTIME"
 
 # Valida a configuração efetiva do Compose.
 docker compose "${COMPOSE_FILES[@]}" config --quiet
@@ -184,7 +184,7 @@ inspect_configuration() {
 check_runtime() {
   docker compose "${COMPOSE_FILES[@]}" \
     run --rm --no-deps -T \
-    -e CODEX_CHECK_MODE="$MODE" \
+    -e DEV_SANDBOX_CHECK_MODE="$MODE" \
     codex node - < "$BASE_DIR/bin/check_runtime.js"
 }
 
@@ -194,13 +194,14 @@ if [[ "$ACTION" == "status" ]]; then
 fi
 
 # Confirma que a imagem selecionada existe.
-IMAGE="codex-isolated:$CODEX_RUNTIME"
+IMAGE="dev-sandbox:$DEV_SANDBOX_RUNTIME"
 
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   echo "Imagem não encontrada: $IMAGE" >&2
   echo "Construa a imagem antes de continuar:" >&2
-  echo "  cd $BASE_DIR" >&2
-  echo "  CODEX_RUNTIME=$CODEX_RUNTIME docker compose build codex" >&2
+  printf '  cd %q\n' "$BASE_DIR" >&2
+  printf '  DEV_SANDBOX_STACK=%q DEV_SANDBOX_WORKSPACE=%q DEV_SANDBOX_RUNTIME=%q docker compose build codex\n' \
+    "$DEV_SANDBOX_STACK" "$DEV_SANDBOX_WORKSPACE" "$DEV_SANDBOX_RUNTIME" >&2
   exit 1
 fi
 

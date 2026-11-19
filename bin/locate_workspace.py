@@ -45,7 +45,7 @@ def locate(source):
         fail(
             'O diretório informado não é um repositório Git válido. '
             'Informe a raiz de um projeto Git e execute '
-            '"codex-isolated prepare <diretorio>" antes de utilizá-lo.'
+            '"dev-sandbox prepare <diretorio>" antes de utilizá-lo.'
         )
 
     git_root = Path(result.stdout.strip()).resolve(strict=True)
