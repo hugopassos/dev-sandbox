@@ -13,6 +13,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from safe_files import read_regular_file, UnsafeFileError
+from workspace_ignore import IGNORE_FILE, ignored, load_ignore_rules
 
 
 WORKSPACES_DIR = (
@@ -31,6 +32,7 @@ MAX_FILE_SIZE = 2 * 1024 * 1024
 MAX_TOTAL_SIZE = 50 * 1024 * 1024
 
 EXCLUDED_NAMES = (
+    IGNORE_FILE,
     '.env',
     '.env.*',
     '.git',
@@ -157,16 +159,15 @@ def create_manifest(
             'sha256': baseline_hash,
         }
 
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    fd, temporary_name = tempfile.mkstemp(dir=MANIFESTS_DIR)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as file:
+            json.dump(manifest, file, indent=2, ensure_ascii=False)
+            file.write('\n')
 
-    if hasattr(os, 'O_NOFOLLOW'):
-        flags |= os.O_NOFOLLOW
-
-    fd = os.open(manifest_path, flags, 0o600)
-
-    with os.fdopen(fd, 'w', encoding='utf-8') as file:
-        json.dump(manifest, file, indent=2, ensure_ascii=False)
-        file.write('\n')
+        os.link(temporary_name, manifest_path)
+    finally:
+        os.unlink(temporary_name)
 
     return manifest_path
 
@@ -189,6 +190,8 @@ def prepare(repo):
 
     if repo == Path.home() or repo == Path('/'):
         fail('Diretório de origem muito abrangente.')
+
+    ignore_rules = load_ignore_rules(repo)
 
     WORKSPACES_DIR.mkdir(parents=True, exist_ok=True)
     WORKSPACES_DIR.chmod(0o700)
@@ -237,18 +240,23 @@ def prepare(repo):
     total_size = 0
 
     try:
-        for relative_name in git_files(repo):
+        for relative_name in dict.fromkeys(git_files(repo)):
             relative = Path(relative_name)
 
             if (
                 relative.is_absolute()
-                or '..' in relative.parts
+                or '\\' in relative_name
+                or any(part in ('', '.', '..') for part in relative_name.split('/'))
                 or not relative.parts
             ):
                 fail('O Git retornou um caminho inválido.')
 
             if excluded(relative):
                 skipped.append((relative_name, 'nome excluído'))
+                continue
+
+            if ignored(relative, ignore_rules):
+                skipped.append((relative_name, IGNORE_FILE))
                 continue
 
             if has_symlink_component(repo, relative):
@@ -276,6 +284,7 @@ def prepare(repo):
                     repo,
                     relative_name,
                     MAX_FILE_SIZE,
+                    require_single_link=True,
                 )
             except FileNotFoundError:
                 fail(f'Arquivo desapareceu durante a preparação: {relative_name}')
@@ -391,7 +400,7 @@ def main():
 
     try:
         prepare(Path(sys.argv[1]))
-    except (OSError, subprocess.CalledProcessError) as error:
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
         fail(str(error))
 
 

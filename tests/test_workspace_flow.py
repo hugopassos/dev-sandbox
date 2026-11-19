@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -93,6 +94,7 @@ class WorkspaceFlowTest(unittest.TestCase):
 
         self.assertEqual(manifest['schema_version'], 1)
         self.assertEqual(manifest['source'], str(self.repo))
+        self.assertEqual(manifest['excluded_files'], [])
 
         self.assertEqual(
             (self.workspace / 'main.rb').read_text(),
@@ -214,6 +216,160 @@ class WorkspaceFlowTest(unittest.TestCase):
             (self.workspace / 'main.rb').read_text(),
             "puts 'Original'\n",
         )
+
+    def test_prepare_applies_root_relative_ignore_rules(self):
+        excluded = [
+            'notes.txt', 'docs/a.txt', 'docs/nested/b.txt',
+            'root.log', 'logs/root.txt', 'logs/a/b/deep.txt',
+        ]
+        kept = ['nested/notes.txt', 'nested/root.log', 'nested/docs/a.txt']
+        for name in excluded + kept + ['.env']:
+            self.write(self.repo / name, 'Example\n')
+        self.write(
+            self.repo / '.dev-sandboxignore',
+            '# Comentário\n\n  # Outro comentário\n'
+            '/notes.txt\ndocs/\n*.log\nlogs/**/*.txt\n.env\n',
+        )
+        self.git('add', '-f', '--', *excluded, *kept, '.env', '.dev-sandboxignore')
+
+        result = self.prepare()
+
+        self.assertIn('Arquivos ignorados: 8', result.stdout)
+        self.assertIn('.env (nome excluído)', result.stdout)
+        manifest = json.loads(self.manifest.read_text())
+        self.assertCountEqual(manifest['excluded_files'], [
+            *excluded, '.env', '.dev-sandboxignore',
+        ])
+        baseline = Path(manifest['baseline'])
+        for name in manifest['excluded_files']:
+            self.assertFalse((self.workspace / name).exists(), name)
+            self.assertFalse((baseline / name).exists(), name)
+        for name in kept:
+            self.assertTrue((self.workspace / name).is_file(), name)
+
+        for script in ('audit', 'review', 'merge'):
+            result = self.command(f'{script}_workspace.py', self.repo)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_changed_rules_block_audit_until_workspace_is_replaced(self):
+        self.write(self.repo / 'notes.txt', 'Example\n')
+        self.git('add', 'notes.txt')
+        self.prepare()
+        self.write(self.repo / '.dev-sandboxignore', 'notes.txt\n')
+
+        second = self.command('prepare_workspace.py', self.repo)
+        self.assertNotEqual(second.returncode, 0)
+        self.assertIn('workspace já existe', second.stderr)
+        self.assertTrue((self.workspace / 'notes.txt').is_file())
+        audit = self.command('audit_workspace.py', self.repo)
+        self.assertNotEqual(audit.returncode, 0)
+        self.assertIn('notes.txt: excluído por .dev-sandboxignore', audit.stderr)
+
+        baseline = Path(json.loads(self.manifest.read_text())['baseline'])
+        shutil.rmtree(self.workspace)
+        shutil.rmtree(baseline)
+        self.manifest.unlink()
+        self.prepare()
+        self.assertFalse((self.workspace / 'notes.txt').exists())
+        audit = self.command('audit_workspace.py', self.repo)
+        self.assertEqual(audit.returncode, 0, audit.stderr)
+
+    def test_invalid_rules_do_not_publish_or_modify_workspace(self):
+        rules = self.repo / '.dev-sandboxignore'
+        self.write(rules, 'docs/\n!main.rb\n')
+        result = self.command('prepare_workspace.py', self.repo)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('.dev-sandboxignore: regra inválida na linha 2', result.stderr)
+        self.assertFalse(self.workspace.exists())
+        self.assertFalse(self.manifest.exists())
+
+        rules.unlink()
+        self.prepare()
+        original_manifest = self.manifest.read_bytes()
+        baseline = Path(json.loads(original_manifest)['baseline'])
+        self.write(self.workspace / 'main.rb', 'Workspace edit\n')
+        self.write(rules, '../main.rb\n')
+        result = self.command('prepare_workspace.py', self.repo)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('.dev-sandboxignore: regra inválida na linha 1', result.stderr)
+        self.assertEqual(self.manifest.read_bytes(), original_manifest)
+        self.assertEqual((baseline / 'main.rb').read_text(), "puts 'Original'\n")
+        self.assertEqual((self.workspace / 'main.rb').read_text(), 'Workspace edit\n')
+        audit = self.command('audit_workspace.py', self.repo)
+        self.assertNotEqual(audit.returncode, 0)
+        self.assertIn('.dev-sandboxignore', audit.stderr)
+
+    def test_ignore_file_symlink_is_rejected(self):
+        (self.repo / '.dev-sandboxignore').symlink_to('absent')
+        result = self.command('prepare_workspace.py', self.repo)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('.dev-sandboxignore: falha na leitura', result.stderr)
+        self.assertFalse(self.workspace.exists())
+
+    def test_ignore_rule_does_not_bypass_content_scan_for_allowed_file(self):
+        self.write(self.repo / 'main.rb', 'api_key = "FAKE_EXAMPLE_123456"\n')
+        self.write(self.repo / '.dev-sandboxignore', 'other.rb\n')
+        result = self.command('prepare_workspace.py', self.repo)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Preparação interrompida por possível segredo', result.stderr)
+        self.assertFalse(self.workspace.exists())
+
+    def test_prepare_skips_content_scan_for_explicitly_ignored_file(self):
+        self.write(self.repo / 'settings.rb', 'api_key = "FAKE_EXAMPLE_123456"\n')
+        self.git('add', 'settings.rb')
+        self.write(self.repo / '.dev-sandboxignore', 'settings.rb\n')
+
+        result = self.prepare()
+
+        self.assertIn('settings.rb (.dev-sandboxignore)', result.stdout)
+        main_size = (self.repo / 'main.rb').stat().st_size
+        self.assertIn(f'Tamanho copiado: {main_size} bytes\n', result.stdout)
+        self.assertTrue((self.workspace / 'main.rb').is_file())
+        self.assertFalse((self.workspace / 'settings.rb').exists())
+
+    def test_review_diff_and_merge_skip_currently_ignored_changes(self):
+        self.write(self.repo / 'notes.txt', 'Original notes\n')
+        self.git('add', 'notes.txt')
+        self.prepare()
+        self.write(self.workspace / 'main.rb', 'Allowed edit\n')
+        self.write(self.workspace / 'notes.txt', 'Ignored edit\n')
+        self.write(self.repo / '.dev-sandboxignore', 'notes.txt\n')
+
+        for script in ('review', 'diff', 'merge'):
+            with self.subTest(script=script):
+                result = self.command(f'{script}_workspace.py', self.repo)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('main.rb', result.stdout)
+                self.assertNotIn('notes.txt', result.stdout)
+                self.assertNotIn('Ignored edit', result.stdout)
+                if script == 'diff':
+                    self.assertIn('+Allowed edit', result.stdout)
+
+        merges = self.workspace.parent.parent / 'merges' / self.workspace_name
+        session, = merges.iterdir()
+        self.assertEqual((session / 'files' / 'main.rb').read_text(), 'Allowed edit\n')
+        self.assertFalse((session / 'files' / 'notes.txt').exists())
+        report = json.loads((session / 'merge-report.json').read_text())
+        self.assertEqual([record['path'] for record in report['files']], ['main.rb'])
+
+    def test_invalid_or_unreadable_rules_block_review_diff_and_merge(self):
+        self.prepare()
+        self.write(self.workspace / 'main.rb', 'Allowed edit\n')
+        rules = self.repo / '.dev-sandboxignore'
+        merges = self.workspace.parent.parent / 'merges'
+
+        for content, expected in (
+            (b'other.rb\n!main.rb\n', 'regra inválida na linha 2'),
+            (b'\xff', 'falha na leitura'),
+        ):
+            rules.write_bytes(content)
+            for script in ('review', 'diff', 'merge'):
+                with self.subTest(script=script, error=expected):
+                    result = self.command(f'{script}_workspace.py', self.repo)
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn(f'.dev-sandboxignore: {expected}', result.stderr)
+                    self.assertEqual(result.stdout, '')
+                    self.assertFalse(merges.exists())
 
     def test_prepare_preserves_immutable_baseline(self):
         self.write(

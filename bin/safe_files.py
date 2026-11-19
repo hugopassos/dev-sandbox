@@ -35,7 +35,7 @@ def read_regular_file(root, relative, max_size, require_single_link=False):
         os.O_NOFOLLOW
     )
 
-    file_flags = os.O_RDONLY | os.O_NOFOLLOW
+    file_flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
 
     if hasattr(os, 'O_CLOEXEC'):
         directory_flags |= os.O_CLOEXEC

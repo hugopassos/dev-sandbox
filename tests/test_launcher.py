@@ -317,6 +317,16 @@ class LauncherTest(unittest.TestCase):
         )
         self.assertEqual(self.docker_calls(), [])
 
+    def test_new_ignore_rule_blocks_docker_execution(self):
+        self.prepare()
+        (self.repo / '.dev-sandboxignore').write_text('main.rb\n', encoding='utf-8')
+
+        result = self.launcher('dev', self.repo, 'ruby')
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('main.rb: excluído por .dev-sandboxignore', result.stderr)
+        self.assertEqual(self.docker_calls(), [])
+
 
 if __name__ == '__main__':
     unittest.main()

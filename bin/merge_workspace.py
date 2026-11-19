@@ -23,6 +23,7 @@ from review_workspace import (
     workspace_files,
 )
 from safe_files import read_regular_file, UnsafeFileError
+from workspace_ignore import ignored, load_ignore_rules
 
 
 MERGES_DIR = (
@@ -136,6 +137,7 @@ def write_result(root, name, data):
 
 def produce_merge(source_path):
     source, workspace, manifest = load_manifest(source_path)
+    ignore_rules = load_ignore_rules(source)
 
     expected_baseline = BASELINES_DIR / workspace.name
 
@@ -190,6 +192,9 @@ def produce_merge(source_path):
         for name in sorted(set(baseline) | current):
             if not valid_relative(name) or excluded(Path(name)):
                 raise MergeError(f'Caminho proibido: {name!r}')
+
+            if ignored(Path(name), ignore_rules):
+                continue
 
             initial_hash = baseline.get(name)
 

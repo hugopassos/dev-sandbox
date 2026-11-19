@@ -15,10 +15,12 @@ from review_workspace import (
 )
 from safe_files import read_regular_file, UnsafeFileError
 from prepare_workspace import MAX_FILE_SIZE
+from workspace_ignore import IGNORE_FILE, ignored, load_ignore_rules
 
 
 def audit(source_path):
-    source, workspace, manifest = load_manifest(source_path)
+    source, workspace, _ = load_manifest(source_path)
+    ignore_rules = load_ignore_rules(source)
 
     files, unsafe_paths = workspace_files(workspace)
     problems = []
@@ -30,6 +32,10 @@ def audit(source_path):
     for name in sorted(files):
         if not valid_relative(name) or excluded(Path(name)):
             problems.append((name, 'nome ou caminho proibido'))
+            continue
+
+        if ignored(Path(name), ignore_rules):
+            problems.append((name, f'excluído por {IGNORE_FILE}. Prepare uma nova cópia'))
             continue
 
         state, _ = inspect_file(

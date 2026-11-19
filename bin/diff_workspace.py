@@ -18,6 +18,7 @@ from review_workspace import (
     workspace_files,
 )
 from safe_files import read_regular_file, UnsafeFileError
+from workspace_ignore import ignored, load_ignore_rules
 
 
 MAX_DIFF_FILES = 100
@@ -89,6 +90,7 @@ def display_diff(name, original, modified):
 
 def diff_workspace(source_path):
     source, workspace, manifest = load_manifest(source_path)
+    ignore_rules = load_ignore_rules(source)
 
     baseline = {
         name: metadata['sha256']
@@ -116,6 +118,9 @@ def diff_workspace(source_path):
     for name in names:
         if not valid_relative(name) or excluded(Path(name)):
             blocked.append((name, 'caminho proibido'))
+            continue
+
+        if ignored(Path(name), ignore_rules):
             continue
 
         workspace_state, workspace_hash = inspect_file(

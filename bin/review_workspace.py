@@ -9,6 +9,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 from safe_files import read_regular_file, UnsafeFileError
+from workspace_ignore import ignored, load_ignore_rules
 
 from prepare_workspace import (
     MANIFESTS_DIR,
@@ -160,6 +161,7 @@ def load_manifest(source):
 
 def review(source):
     source, workspace, manifest = load_manifest(source)
+    ignore_rules = load_ignore_rules(source)
 
     baseline = {
         name: metadata['sha256']
@@ -177,6 +179,9 @@ def review(source):
 
         if excluded(Path(name)):
             records.append(('INSEGURO', name))
+            continue
+
+        if ignored(Path(name), ignore_rules):
             continue
 
         workspace_state, workspace_hash = inspect_file(
